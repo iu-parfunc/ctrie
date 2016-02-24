@@ -2,17 +2,17 @@
 
 module Main where
 
-import Control.Applicative
-import Control.Monad
-import Data.Hashable
-import Data.Function (on)
-import qualified Data.Map as M
-import qualified Data.List as L
-import qualified Control.Concurrent.Map as CM
-import Test.QuickCheck
-import Test.QuickCheck.Monadic
-import Test.Framework (defaultMain, testGroup)
-import Test.Framework.Providers.QuickCheck2 (testProperty)
+import           Control.Applicative
+import qualified Control.Concurrent.Map               as CM
+import           Control.Monad
+import           Data.Function                        (on)
+import           Data.Hashable
+import qualified Data.List                            as L
+import qualified Data.Map                             as M
+import           Test.Framework                       (defaultMain, testGroup)
+import           Test.Framework.Providers.QuickCheck2 (testProperty)
+import           Test.QuickCheck
+import           Test.QuickCheck.Monadic
 
 -- most of this based on the unordered-containers tests
 

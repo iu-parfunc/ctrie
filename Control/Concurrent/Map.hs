@@ -1,5 +1,6 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE BangPatterns, PatternGuards, MagicHash #-}
+{-# LANGUAGE CPP           #-}
+{-# LANGUAGE MagicHash     #-}
+{-# LANGUAGE PatternGuards #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 -----------------------------------------------------------------------
 -- | A non-blocking concurrent map from hashable keys to values.
@@ -40,16 +41,17 @@ module Control.Concurrent.Map
 #if __GLASGOW_HASKELL__ < 710
 import Control.Applicative ((<$>))
 #endif
-import Control.Monad
-import Data.Atomics
-import Data.Bits
-import Data.Hashable (Hashable)
-import qualified Data.Hashable as H
-import Data.IORef
-import qualified Data.List as List
-import Data.Maybe
-import Data.Word
-import Prelude hiding (lookup)
+import           Control.DeepSeq
+import           Control.Monad
+import           Data.Atomics       hiding (readForCAS)
+import           Data.Bits
+import           Data.CNFRef.Simple
+import           Data.Hashable      (Hashable)
+import qualified Data.Hashable      as H
+import qualified Data.List          as List
+import           Data.Maybe
+import           Data.Word
+import           Prelude            hiding (lookup)
 
 import qualified Control.Concurrent.Map.Array as A
 
@@ -58,11 +60,15 @@ import qualified Control.Concurrent.Map.Array as A
 -- | A map from keys @k@ to values @v@.
 newtype Map k v = Map (INode k v)
 
-type INode k v = IORef (MainNode k v)
+type INode k v = CNFRef (MainNode k v)
 
 data MainNode k v = CNode !Bitmap !(A.Array (Branch k v))
                   | Tomb !(SNode k v)
                   | Collision ![SNode k v]
+
+instance NFData (MainNode k v) where
+  rnf _ = ()
+instance DeepStrict (MainNode k v) where
 
 data Branch k v = INode !(INode k v)
                 | SNode !(SNode k v)
@@ -87,7 +93,7 @@ hash = fromIntegral . H.hash
 
 -- | /O(1)/. Construct an empty map.
 empty :: IO (Map k v)
-empty = Map <$> newIORef (CNode 0 A.empty)
+empty = Map <$> newCNFRef (CNode 0 A.empty)
 
 
 -----------------------------------------------------------------------
@@ -111,21 +117,21 @@ insert k v (Map root) = go0
                         then do
                             let arr' = A.insert (SNode (S k v)) i n arr
                                 cn'  = CNode (bmp .|. m) arr'
-                            unlessM (fst <$> casIORef inode ticket cn') go0
+                            unlessM (fst <$> casCNFRef inode ticket cn') go0
 
                         else case A.index arr i of
                             SNode (S k2 v2)
                                 | k == k2 -> do
                                     let arr' = A.update (SNode (S k v)) i n arr
                                         cn'  = CNode bmp arr'
-                                    unlessM (fst <$> casIORef inode ticket cn') go0
+                                    unlessM (fst <$> casCNFRef inode ticket cn') go0
 
                                 | otherwise -> do
                                     let h2 = hash k2
                                     inode2 <- newINode h k v h2 k2 v2 (nextLevel lev)
                                     let arr' = A.update (INode inode2) i n arr
                                         cn'  = CNode bmp arr'
-                                    unlessM (fst <$> casIORef inode ticket cn') go0
+                                    unlessM (fst <$> casCNFRef inode ticket cn') go0
 
                             INode inode2 -> go (nextLevel lev) inode inode2
 
@@ -134,22 +140,22 @@ insert k v (Map root) = go0
                 Collision arr -> do
                     let arr' = S k v : filter (\(S k2 _) -> k2 /= k) arr
                         col' = Collision arr'
-                    unlessM (fst <$> casIORef inode ticket col') go0
+                    unlessM (fst <$> casCNFRef inode ticket col') go0
 
 {-# INLINABLE insert #-}
 
 newINode :: Hash -> k -> v -> Hash -> k -> v -> Int -> IO (INode k v)
 newINode h1 k1 v1 h2 k2 v2 lev
-    | lev >= hashLength = newIORef $ Collision [S k1 v1, S k2 v2]
+    | lev >= hashLength = newCNFRef $ Collision [S k1 v1, S k2 v2]
     | otherwise = do
         let i1 = index h1 lev
             i2 = index h2 lev
             bmp = (unsafeShiftL 1 i1) .|. (unsafeShiftL 1 i2)
         case compare i1 i2 of
-            LT -> newIORef $ CNode bmp $ A.pair (SNode (S k1 v1)) (SNode (S k2 v2))
-            GT -> newIORef $ CNode bmp $ A.pair (SNode (S k2 v2)) (SNode (S k1 v1))
+            LT -> newCNFRef $ CNode bmp $ A.pair (SNode (S k1 v1)) (SNode (S k2 v2))
+            GT -> newCNFRef $ CNode bmp $ A.pair (SNode (S k2 v2)) (SNode (S k1 v1))
             EQ -> do inode' <- newINode h1 k1 v1 h2 k2 v2 (nextLevel lev)
-                     newIORef $ CNode bmp $ A.singleton (INode inode')
+                     newCNFRef $ CNode bmp $ A.singleton (INode inode')
 
 
 -- | /O(log n)/. Remove the given key and its associated value from the map,
@@ -173,8 +179,8 @@ delete k (Map root) = go0
                                     let arr' = A.delete i (popCount bmp) arr
                                         cn'  = CNode (bmp `xor` m) arr'
                                         cn'' = contract lev cn'
-                                    unlessM (fst <$> casIORef inode ticket cn'') go0
-                                    whenM (isTomb <$> readIORef inode) $
+                                    unlessM (fst <$> casCNFRef inode ticket cn'') go0
+                                    whenM (isTomb <$> readCNFRef inode) $
                                         cleanParent parent inode h (prevLevel lev)
 
                                 | otherwise -> return ()  -- not found
@@ -187,7 +193,7 @@ delete k (Map root) = go0
                     let arr' = filter (\(S k2 _) -> k2 /= k) $ arr
                         col' | [s] <- arr' = Tomb s
                              | otherwise   = Collision arr'
-                    unlessM (fst <$> casIORef inode ticket col') go0
+                    unlessM (fst <$> casCNFRef inode ticket col') go0
 
 {-# INLINABLE delete #-}
 
@@ -201,7 +207,7 @@ lookup k (Map root) = go0
         h = hash k
         go0 = go 0 undefined root
         go lev parent inode = do
-            main <- readIORef inode
+            main <- readCNFRef inode
             case main of
                 CNode bmp arr -> do
                     let m = mask h lev
@@ -231,7 +237,7 @@ clean inode lev = do
     case peekTicket ticket of
         cn@(CNode _ _) -> do
             cn' <- compress lev cn
-            void $ casIORef inode ticket cn'
+            void $ casCNFRef inode ticket cn'
         _ -> return ()
 {-# INLINE clean #-}
 
@@ -245,9 +251,9 @@ cleanParent parent inode h lev = do
             unless (bmp .&. m == 0) $
                 case A.index arr i of
                     INode inode2 | inode2 == inode ->
-                        whenM (isTomb <$> readIORef inode) $ do
+                        whenM (isTomb <$> readCNFRef inode) $ do
                             cn' <- compress lev cn
-                            unlessM (fst <$> casIORef parent ticket cn') $
+                            unlessM (fst <$> casCNFRef parent ticket cn') $
                                 cleanParent parent inode h lev
                     _ -> return ()
         _ -> return ()
@@ -260,7 +266,7 @@ compress _ x = return x
 
 resurrect :: Branch k v -> IO (Branch k v)
 resurrect b@(INode inode) = do
-    main <- readIORef inode
+    main <- readCNFRef inode
     case main of
         Tomb s -> return (SNode s)
         _      -> return b
@@ -291,7 +297,7 @@ unsafeToList :: Map k v -> IO [(k,v)]
 unsafeToList (Map root) = go root
     where
         go inode = do
-            main <- readIORef inode
+            main <- readCNFRef inode
             case main of
                 CNode bmp arr -> A.foldM' go2 [] (popCount bmp) arr
                 Tomb (S k v) -> return [(k,v)]
@@ -351,7 +357,7 @@ prevLevel = subtract bitsPerSubkey
 --printMap :: (Show k, Show v) => Map k v -> IO ()
 --printMap (Map root) = goI root
 --    where
---        goI inode = putStr "(I " >> readIORef inode >>= goM >> putStr ")\n"
+--        goI inode = putStr "(I " >> readCNFRef inode >>= goM >> putStr ")\n"
 --        goM (CNode bmp arr) = do
 --            putStr $ "(C " ++ (show bmp) ++ " ["
 --            A.mapM_ (\b -> goB b >> putStr ", ") (popCount bmp) arr
