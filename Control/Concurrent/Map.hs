@@ -29,6 +29,7 @@ module Control.Concurrent.Map
     , delete
     , insertIfAbsent
     , putIfAbsent
+    , PutResult(..)
 
       -- * Query
     , lookup
@@ -144,9 +145,11 @@ insert k v (Map root) = go0
 
 {-# INLINABLE insert #-}
 
+data PutResult v = Added v | Found v
+
 -- | /O(log n)/. Associate the given value with the given key.
 -- If the key is already present in the map, don't change the value.
-insertIfAbsent :: (Eq k, Hashable k) => k -> v -> Map k v -> IO ()
+insertIfAbsent :: (Eq k, Hashable k) => k -> v -> Map k v -> IO (PutResult v)
 insertIfAbsent k v (Map root) = go0
     where
         h = hash k
@@ -162,18 +165,18 @@ insertIfAbsent k v (Map root) = go0
                         then do
                             let arr' = A.insert (SNode (S k v)) i n arr
                                 cn'  = CNode (bmp .|. m) arr'
-                            unlessM (fst <$> casIORef inode ticket cn') go0
+                            unlessM' v (fst <$> casIORef inode ticket cn') go0
 
                         else case A.index arr i of
                             SNode (S k2 v2)
-                                | k == k2 -> return ()
+                                | k == k2 -> return $ Found v
 
                                 | otherwise -> do
                                     let h2 = hash k2
                                     inode2 <- newINode h k v h2 k2 v2 (nextLevel lev)
                                     let arr' = A.update (INode inode2) i n arr
                                         cn'  = CNode bmp arr'
-                                    unlessM (fst <$> casIORef inode ticket cn') go0
+                                    unlessM' v (fst <$> casIORef inode ticket cn') go0
 
                             INode inode2 -> go (nextLevel lev) inode inode2
 
@@ -181,19 +184,21 @@ insertIfAbsent k v (Map root) = go0
 
                 Collision arr -> 
                     if any (\(S k2 _) -> k2 == k) arr
-                        then return ()
+                        then return $ Found v
                         else do
                             let arr' = S k v : filter (\(S k2 _) -> k2 /= k) arr
                                 col' = Collision arr'
-                            unlessM (fst <$> casIORef inode ticket col') go0
+                            unlessM' v (fst <$> casIORef inode ticket col') go0
+              where
+                unlessM' v' p s = p >>= \t -> if t then return (Added v') else s
 
 {-# INLINABLE insertIfAbsent #-}
 
 putIfAbsent :: (Ord k, Hashable k, MonadIO m) =>
-               Map k v         -- ^ The map
+               Map k v           -- ^ The map
                -> k              -- ^ The key to lookup/insert
                -> m v            -- ^ A computation of the value to insert
-               -> m ()
+               -> m (PutResult v)
 putIfAbsent m k vc = do
   v <- vc
   liftIO $ insertIfAbsent k v m
