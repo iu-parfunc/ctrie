@@ -58,6 +58,7 @@ import qualified Control.Concurrent.Map.Array as A
 
 -- | A map from keys @k@ to values @v@.
 newtype Map k v = Map (INode k v)
+  deriving (Eq)
 
 type INode k v = IORef (MainNode k v)
 
