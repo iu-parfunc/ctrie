@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE BangPatterns, PatternGuards, MagicHash #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
@@ -34,6 +35,7 @@ module Control.Concurrent.Map
       -- * Lists
     , fromList
     , unsafeToList
+    , foldlWithKey
 
     --, printMap
     ) where
@@ -348,6 +350,21 @@ unsafeToList (Map root) = go root
         go2 xs (INode inode) = go inode >>= \ys -> return (ys ++ xs)
         go2 xs (SNode (S k v)) = return $ (k,v) : xs
 {-# INLINABLE unsafeToList #-}
+
+foldlWithKey :: Monad m => (forall x . IO x -> m x) ->
+                (a -> k -> v -> m a) -> a -> Map k v -> m a
+foldlWithKey liftIO f !a0 (Map root) = go root a0
+    where
+        go inode a = do
+            main <- liftIO $ readIORef inode
+            case main of
+                CNode bmp arr -> A.foldM go2 a (popCount bmp) arr
+                Tomb (S k v) -> f a k v
+                Collision xs -> foldM (\a' (S k v) -> f a' k v) a xs
+
+        go2 a (INode inode) = go inode a
+        go2 a (SNode (S k v)) = f a k v
+
 
 -----------------------------------------------------------------------
 

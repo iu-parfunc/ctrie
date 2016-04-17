@@ -6,7 +6,7 @@ module Control.Concurrent.Map.Array
     , empty, singleton, pair
     , head, index
     , insert, update, delete
-    , mapM, mapM_, foldM'
+    , mapM, mapM_, foldM', foldM
     ) where
 
 import Control.Monad.Primitive
@@ -107,3 +107,13 @@ foldM' f z0 = \n arr -> go n arr 0 z0
                 x <- indexArrayM arr i
                 go n arr (i+1) =<< f z x
 {-# INLINE foldM' #-}
+
+foldM :: Monad m => (b -> a -> m b) -> b -> Int -> Array a -> m b
+foldM f z0 = \n arr -> go n arr 0 z0
+    where
+        go n arr i !z
+            | i >= n = return z
+            | otherwise = do
+                x <- indexArrayM arr i
+                go n arr (i+1) =<< f z x
+{-# INLINE foldM #-}
