@@ -28,6 +28,7 @@ module Control.Concurrent.Map
     , insert
     , delete
     , insertIfAbsent
+    , putIfAbsent
 
       -- * Query
     , lookup
@@ -44,6 +45,7 @@ module Control.Concurrent.Map
 import Control.Applicative ((<$>))
 #endif
 import Control.Monad
+import Control.Monad.IO.Class (liftIO, MonadIO)
 import Data.Atomics
 import Data.Bits
 import Data.Hashable (Hashable)
@@ -187,6 +189,16 @@ insertIfAbsent k v (Map root) = go0
 
 {-# INLINABLE insertIfAbsent #-}
 
+putIfAbsent :: (Ord k, Hashable k, MonadIO m) =>
+               Map k v         -- ^ The map
+               -> k              -- ^ The key to lookup/insert
+               -> m v            -- ^ A computation of the value to insert
+               -> m ()
+putIfAbsent m k vc = do
+  v <- vc
+  liftIO $ insertIfAbsent k v m
+
+{-# INLINABLE putIfAbsent #-}
 
 newINode :: Hash -> k -> v -> Hash -> k -> v -> Int -> IO (INode k v)
 newINode h1 k1 v1 h2 k2 v2 lev
