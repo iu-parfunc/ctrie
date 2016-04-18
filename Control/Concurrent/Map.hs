@@ -59,31 +59,13 @@ import Prelude hiding (lookup)
 
 import qualified Control.Concurrent.Map.Array as A
 
+import Control.Concurrent.Map.Internal
+
 -----------------------------------------------------------------------
-
--- | A map from keys @k@ to values @v@.
-newtype Map k v = Map (INode k v)
-  deriving (Eq)
-
-type INode k v = IORef (MainNode k v)
-
-data MainNode k v = CNode !Bitmap !(A.Array (Branch k v))
-                  | Tomb !(SNode k v)
-                  | Collision ![SNode k v]
-
-data Branch k v = INode !(INode k v)
-                | SNode !(SNode k v)
-
-data SNode k v = S !k v
-    deriving (Eq, Show)
 
 isTomb :: MainNode k v -> Bool
 isTomb (Tomb _) = True
 isTomb _        = False
-
-type Bitmap = Word
-type Hash   = Word
-type Level  = Int
 
 hash :: Hashable a => a -> Hash
 hash = fromIntegral . H.hash
@@ -182,7 +164,7 @@ insertIfAbsent k v (Map root) = go0
 
                 Tomb _ -> clean parent (prevLevel lev) >> go0
 
-                Collision arr -> 
+                Collision arr ->
                     if any (\(S k2 _) -> k2 == k) arr
                         then return $ Found v
                         else do
