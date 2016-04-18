@@ -1,19 +1,11 @@
 -- | The internal types giving the physical representation of
 
 module Control.Concurrent.Map.Internal
-       ( Map(..), INode(..),  MainNode(..), Branch(..), SNode(..)
+       ( Map(..), INode,  MainNode(..), Branch(..), SNode(..)
        , Bitmap, Hash, Level )
        where
 
-import Control.Monad
-import Control.Monad.IO.Class (liftIO, MonadIO)
-import Data.Atomics
-import Data.Bits
-import Data.Hashable (Hashable)
-import qualified Data.Hashable as H
 import Data.IORef
-import qualified Data.List as List
-import Data.Maybe
 import Data.Word
 import Prelude hiding (lookup)
 
