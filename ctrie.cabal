@@ -25,6 +25,7 @@ library
     , atomic-primops >=0.6
     , hashable >=1.2
     , primitive >=0.5
+    , transformers
 
   ghc-options: -Wall
 
