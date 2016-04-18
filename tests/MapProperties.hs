@@ -5,6 +5,7 @@ module Main where
 import Control.Applicative
 import Control.Monad
 import Data.Hashable
+import Data.IORef
 import Data.Function (on)
 import qualified Data.Map as M
 import qualified Data.List as L
@@ -27,8 +28,9 @@ main = defaultMain [ testGroup "basic interface"
                      , testGroup "conversions"
                         [ testProperty "fromList" pFromList
                         , testProperty "unsafeToList" pUnsafeToList
+                        , testProperty "unsafeToList2" pUnsafeToList2
                         ]
-                   ]
+                     ]
 
 -----------------------------------------------------------------------
 
@@ -53,6 +55,15 @@ eq_ f g xs = monadicIO $ do
 unsafeToAscList :: Ord k => CM.Map k v -> IO [(k, v)]
 unsafeToAscList m = do
     xs <- CM.unsafeToList m
+    return $ L.sortBy (compare `on` fst) xs
+
+unsafeToAscList2 :: Ord k => CM.Map k v -> IO [(k, v)]
+unsafeToAscList2 m = do
+    acc <- newIORef []
+    let doelem k v   = modifyIORef acc ((k,v):)
+        dosplit n fn = forM_ [0 .. n-1] fn
+    CM.unsafeTreeTraverse m doelem dosplit
+    xs <- readIORef acc
     return $ L.sortBy (compare `on` fst) xs
 
 -----------------------------------------------------------------------
@@ -88,3 +99,6 @@ pFromList = id `eq_` (\_ -> return ())
 
 pUnsafeToList :: [(Key,Int)] -> Property
 pUnsafeToList = M.toAscList `eq` unsafeToAscList
+
+pUnsafeToList2 :: [(Key,Int)] -> Property
+pUnsafeToList2 = M.toAscList `eq` unsafeToAscList2
