@@ -31,8 +31,9 @@ module Control.Concurrent.Map
     , putIfAbsent
     , PutResult(..)
 
-      -- * Query
+      -- * Query and traversal
     , lookup
+    , unsafeTreeTraverse
 
       -- * Lists
     , fromList
@@ -78,6 +79,43 @@ hash = fromIntegral . H.hash
 empty :: IO (Map k v)
 empty = Map <$> newIORef (CNode 0 A.empty)
 
+
+-----------------------------------------------------------------------
+
+{-# INLINE unsafeTreeTraverse #-}
+-- | Perform a traversal of the internal tree structure without revealing
+-- the exact details of the implementation.
+unsafeTreeTraverse :: MonadIO m
+                   => Map k v
+                   -> (k -> v -> m ())
+                   -> (Int -> (Int -> m ()) -> m ())
+                   -> m ()
+unsafeTreeTraverse (Map root) doElem doSplit = go root
+  where
+    go inode = do
+        main <- liftIO $ readIORef inode
+        case main of
+            CNode bmp arr -> doSplit (popCount bmp)
+                                     (\ix -> go2 (A.index arr ix))
+            Tomb (S k v)  -> doElem k v
+            Collision xs  -> go4 xs
+
+    go2 (INode inode)   = go inode
+    go2 (SNode (S k v)) = doElem k v
+
+    -- Possible minor optimization:
+    -- go3 []                = return ()
+    -- go3 [(SNode (S k v))] = doElem k v
+    -- go3 [(SNode (S k1 v1)),(SNode (S k2 v2))] = do doElem k1 v1; doElem k2 v2
+    -- go3 ls = go4 ls
+
+    go4 []  = return ()
+    go4 ((S k v):rst) = doSplit 2 (\n -> case n of
+                                          0 -> doElem k v
+                                          1 -> go4 rst
+                                          _ -> error $
+                                               "unsafeTreeTraverse: index ("++show n++
+                                               ") is out of bounds for the 2-way split")
 
 -----------------------------------------------------------------------
 -- * Modification
@@ -352,10 +390,10 @@ unsafeToList (Map root) = go root
 
 foldlWithKey :: Monad m => (forall x . IO x -> m x) ->
                 (a -> k -> v -> m a) -> a -> Map k v -> m a
-foldlWithKey liftIO f !a0 (Map root) = go root a0
+foldlWithKey liftio f !a0 (Map root) = go root a0
     where
         go inode a = do
-            main <- liftIO $ readIORef inode
+            main <- liftio $ readIORef inode
             case main of
                 CNode bmp arr -> A.foldM go2 a (popCount bmp) arr
                 Tomb (S k v) -> f a k v
