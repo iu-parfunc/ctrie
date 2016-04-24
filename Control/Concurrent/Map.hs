@@ -34,6 +34,7 @@ module Control.Concurrent.Map
       -- * Query and traversal
     , lookup
     , unsafeTreeTraverse
+    , unsafeTreeTraverse'
 
       -- * Lists
     , fromList
@@ -115,6 +116,33 @@ unsafeTreeTraverse (Map root) doElem doSplit = go root
                                           1 -> go4 rst
                                           _ -> error $
                                                "unsafeTreeTraverse: index ("++show n++
+                                               ") is out of bounds for the 2-way split")
+
+unsafeTreeTraverse' :: MonadIO m
+                    => Map k v
+                    -> (k -> v -> m a)
+                    -> (Int -> (Int -> m a) -> m a)
+                    -> a
+                    -> m a
+unsafeTreeTraverse' (Map root) doElem doSplit acc = go root
+  where
+    go inode = do
+        main <- liftIO $ readIORef inode
+        case main of
+            CNode bmp arr -> doSplit (popCount bmp)
+                                     (\ix -> go2 (A.index arr ix))
+            Tomb (S k v)  -> doElem k v
+            Collision xs  -> go4 xs
+
+    go2 (INode inode)   = go inode
+    go2 (SNode (S k v)) = doElem k v
+
+    go4 []  = return acc
+    go4 ((S k v):rst) = doSplit 2 (\n -> case n of
+                                          0 -> doElem k v
+                                          1 -> go4 rst
+                                          _ -> error $
+                                               "unsafeTreeTraverse': index ("++show n++
                                                ") is out of bounds for the 2-way split")
 
 -----------------------------------------------------------------------
