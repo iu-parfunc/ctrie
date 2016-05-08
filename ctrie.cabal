@@ -20,7 +20,7 @@ extra-source-files:  changelog.md
 library
   exposed-modules:   Control.Concurrent.Map
                      Control.Concurrent.Map.Internal
-  other-modules:     Control.Concurrent.Map.Array
+                     Control.Concurrent.Map.Array
   build-depends:
       base >=4.7 && <5
     , atomic-primops >=0.6
