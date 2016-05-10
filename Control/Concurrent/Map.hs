@@ -86,11 +86,18 @@ empty = Map <$> newIORef (CNode 0 A.empty)
 {-# INLINE unsafeTreeTraverse #-}
 -- | Perform a traversal of the internal tree structure without revealing
 -- the exact details of the implementation.
+--
+-- This traversal is for side effect only.
 unsafeTreeTraverse :: MonadIO m
-                   => Map k v
-                   -> (k -> v -> m ())
-                   -> (Int -> (Int -> m ()) -> m ())
-                   -> m ()
+  => Map k v             -- ^ Input ctrie map
+  -> (k -> v -> m ())    -- ^ Function to process one element.
+  -> (Int -> (Int -> m ()) -> m ())
+            -- ^ Function to perform the parallel split, it in turn
+            -- calls back the designated number of times, possibly in
+            -- parallel.  This is a coroutine style where one party
+            -- knows how to traverse the structure, and one party
+            -- knows how to create parallel tasks.
+  -> m ()
 unsafeTreeTraverse (Map root) doElem doSplit = go root
   where
     go inode = do
@@ -118,6 +125,10 @@ unsafeTreeTraverse (Map root) doElem doSplit = go root
                                                "unsafeTreeTraverse: index ("++show n++
                                                ") is out of bounds for the 2-way split")
 
+-- | Similar to `unsafeTreeTraverse`, but with a return value.
+--   This variant includes a fold over the sturcture.
+--   The split-handling function must also be the fold function,
+--   combining the results of different recursive computations.
 unsafeTreeTraverse' :: MonadIO m
                     => Map k v
                     -> (k -> v -> m a)
